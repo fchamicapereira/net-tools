@@ -18,8 +18,8 @@ RESULTS_FILENAME     = 'results.csv'
 MIN_RATE             = 0   # Gbps
 MAX_RATE             = 100 # Gbps
 
-DEFAULT_TX_CORES     = 4
-DEFAULT_RX_CORES     = 4
+DEFAULT_TX_CORES     = 2
+DEFAULT_RX_CORES     = 2
 DEFAULT_DURATION_SEC = 10 # seconds
 
 DPDK_PKTGEN_SCRIPT_TEMPLATE = \
@@ -105,7 +105,7 @@ def get_device_numa_node(pcie_dev):
 		if not result:
 			return 0
 
-		assert len(result.groups()) == 1
+		assert result
 		return int(result.group(1))
 	except subprocess.CalledProcessError:
 		print(f'Invalid PCIE dev {pcie_dev}')
@@ -117,7 +117,7 @@ def get_all_cpus():
 	info   = info.decode('utf-8')
 	result = re.search(r"CPU\(s\):\D+(\d+)", info)
 
-	assert len(result.groups()) == 1
+	assert result
 	total_cpus = int(result.group(1))
 	
 	return [ x for x in range(total_cpus) ]
@@ -131,7 +131,7 @@ def get_numa_node_cpus(node):
 	assert len(info) > 0
 	total_nodes_match = re.search(r"\D+(\d+)", info[0])
 	
-	assert len(total_nodes_match.groups()) == 1
+	assert total_nodes_match
 	total_nodes = int(total_nodes_match.group(1))
 
 	if node > total_nodes:
@@ -144,8 +144,17 @@ def get_numa_node_cpus(node):
 	assert len(info) == total_nodes + 1
 	node_info = info[node + 1]
 
+	if '-' in node_info:
+		cpus_match = re.search(r"\D+(\d+)\-(\d+)$", node_info)
+		assert cpus_match
+
+		min_cpu = int(cpus_match.group(1))
+		max_cpu = int(cpus_match.group(2))
+
+		return [ cpu for cpu in range(min_cpu, max_cpu + 1) ]
+
 	cpus_match = re.search(r"\D+([\d,]+)$", node_info)
-	assert len(cpus_match.groups()) == 1
+	assert cpus_match
 	return [ int(i) for i in cpus_match.groups(0)[0].split(',') ]
 
 def get_pcie_dev_cpus(pcie_dev):

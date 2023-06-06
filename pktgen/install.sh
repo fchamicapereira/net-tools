@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 DPDK_VERSION="22.11.2"
 PKTGEN_VERSION="23.06.1"
 RTE_TARGET=x86_64-native-linux-gcc
