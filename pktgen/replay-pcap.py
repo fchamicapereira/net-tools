@@ -17,10 +17,13 @@ RESULTS_FILENAME     = 'results.csv'
 
 MIN_RATE             = 0   # Gbps
 MAX_RATE             = 100 # Gbps
+LOSS_THRESHOLD       = 0.1 # %
+CHECKING_ERROR       = 0.1 # relative error
 
 DEFAULT_TX_CORES     = 2
 DEFAULT_RX_CORES     = 2
 DEFAULT_DURATION_SEC = 10 # seconds
+DEFAULT_ITERATIONS   = 10
 
 DPDK_PKTGEN_SCRIPT_TEMPLATE = \
 """
@@ -83,10 +86,10 @@ end
 main();
 """
 
-def build_lua_script(rate, tx, rx, duration_sec):
+def build_lua_script(rate, cfg, duration_sec):
 	script = DPDK_PKTGEN_SCRIPT_TEMPLATE
-	script = script.replace('{{sendport}}', str(tx['port']))
-	script = script.replace('{{recvport}}', str(rx['port']))
+	script = script.replace('{{sendport}}', str(cfg['tx']['port']))
+	script = script.replace('{{recvport}}', str(cfg['rx']['port']))
 	script = script.replace('{{rate}}', str(rate))
 	script = script.replace('{{duration}}', str(duration_sec * 1000))
 	script = script.replace('{{results_filename}}', PKTGEN_RESULTS)
@@ -167,24 +170,24 @@ def get_port_from_pcie_dev(pcie_dev):
 	# I'm not sure this is the convention, but it works so far
 	return int(pcie_dev.split('.')[1])
 
-def build_pktgen_command(pcap, rate, tx, rx, master_core, duration_sec):
+def build_pktgen_command(pcap, rate, cfg, duration_sec):
 	all_used_cores = \
-		master_core + \
-		tx['cores']['tx'] + \
-		tx['cores']['rx'] + \
-		rx['cores']['tx'] + \
-		rx['cores']['rx']
+		cfg['master'] + \
+		cfg['tx']['cores']['tx'] + \
+		cfg['tx']['cores']['rx'] + \
+		cfg['rx']['cores']['tx'] + \
+		cfg['rx']['cores']['rx']
 
 	all_used_cores = ','.join([ str(c) for c in all_used_cores ])
 
-	tx_rx_cores    = '/'.join([ str(c) for c in tx['cores']['rx'] ])
-	tx_tx_cores    = '/'.join([ str(c) for c in tx['cores']['tx'] ])
+	tx_rx_cores    = '/'.join([ str(c) for c in cfg['tx']['cores']['rx'] ])
+	tx_tx_cores    = '/'.join([ str(c) for c in cfg['tx']['cores']['tx'] ])
 
-	rx_rx_cores    = '/'.join([ str(c) for c in rx['cores']['rx'] ])
-	rx_tx_cores    = '/'.join([ str(c) for c in rx['cores']['tx'] ])
+	rx_rx_cores    = '/'.join([ str(c) for c in cfg['rx']['cores']['rx'] ])
+	rx_tx_cores    = '/'.join([ str(c) for c in cfg['rx']['cores']['tx'] ])
 
-	tx_cfg         = f"[{tx_rx_cores}:{tx_tx_cores}].{tx['port']}"
-	rx_cfg         = f"[{rx_rx_cores}:{rx_tx_cores}].{rx['port']}"
+	tx_cfg         = f"[{tx_rx_cores}:{tx_tx_cores}].{cfg['tx']['port']}"
+	rx_cfg         = f"[{rx_rx_cores}:{rx_tx_cores}].{cfg['rx']['port']}"
 
 	cmd = [
 		"sudo", "-E",
@@ -192,12 +195,12 @@ def build_pktgen_command(pcap, rate, tx, rx, master_core, duration_sec):
 		"-l", f"{all_used_cores}",
 		"-n", "4",
 		"--proc-type", "auto",
-		"-a", tx['dev'],
-		"-a", rx['dev'],
+		"-a", cfg['tx']['dev'],
+		"-a", cfg['rx']['dev'],
 		"--",
 		"-N", "-T", "-P",
 		"-m", f"{tx_cfg},{rx_cfg}",
-		"-s", f"{tx['port']}:{pcap}",
+		"-s", f"{cfg['tx']['port']}:{pcap}",
 		"-f", f"{PKTGEN_SCRIPT}",
 	]
 
@@ -205,9 +208,26 @@ def build_pktgen_command(pcap, rate, tx, rx, master_core, duration_sec):
 	
 	return cmd
 
-def run_pktgen(pcap, rate, tx, rx, master_core, duration_sec, dry_run, verbose):
-	build_lua_script(rate, tx, rx, duration_sec)	
-	pktgen_cmd = build_pktgen_command(pcap, rate, tx, rx, master_core, duration_sec)
+def save_data(data):
+	results = []
+
+	results.append(str(data['tx']['pkt_rate']))
+	results.append(str(data['tx']['rate']))
+	results.append(str(data['rx']['pkt_rate']))
+	results.append(str(data['rx']['rate']))
+	results.append(str(data['loss']))
+
+	with open(RESULTS_FILENAME, 'w') as f:
+		f.write('# tx (Mpps), tx (Gbps), rx (Mpps), rx (Gbps), loss (%)')
+		f.write('\n')
+		f.write(','.join(results))
+		f.write('\n')
+
+def run_pktgen(pcap, rate, cfg, duration_sec, dry_run, verbose):
+	print(f"[*] Replaying at {rate}% linerate")
+
+	build_lua_script(rate, cfg, duration_sec)	
+	pktgen_cmd = build_pktgen_command(pcap, rate, cfg, duration_sec)
 
 	if dry_run:
 		exit(0)
@@ -233,21 +253,105 @@ def run_pktgen(pcap, rate, tx, rx, master_core, duration_sec, dry_run, verbose):
 	
 	data = {
 		'tx': {
-			'rate': float(results[0]) / 1e9,
+			'rate':     float(results[0]) / 1e9,
 			'pkt_rate': float(results[1]) / 1e6,
 		},
 		'rx': {
-			'rate': float(results[2]) / 1e9,
+			'rate':     float(results[2]) / 1e9,
 			'pkt_rate': float(results[3]) / 1e6,
 		},
 		'loss': float(results[4]) * 100,
 	}
 
-	print(f"[*] TX   {data['tx']['pkt_rate']:.3f} Mpps {data['tx']['rate']:.3f} Gbps")
-	print(f"[*] RX   {data['rx']['pkt_rate']:.3f} Mpps {data['rx']['rate']:.3f} Gbps")
+	print(f"[*] TX   {data['tx']['pkt_rate']:3.2f} Mpps {data['tx']['rate']:3.2f} Gbps")
+	print(f"[*] RX   {data['rx']['pkt_rate']:3.2f} Mpps {data['rx']['rate']:3.2f} Gbps")
 	print(f"[*] loss {data['loss']} %")
 
 	return data
+
+def search_throughput(pcap, cfg, duration_sec, iterations, dry_run, verbose):
+	upper_bound = 100.0 # %
+	lower_bound = 0     # %
+	
+	max_rate = upper_bound
+	mid_rate = upper_bound
+	min_rate = lower_bound
+
+	best_data = {
+		'tx': {
+			'rate':     0,
+			'pkt_rate': 0,
+		},
+		'rx': {
+			'rate':     0,
+			'pkt_rate': 0,
+		},
+		'loss': 0,
+	}
+
+	last_tx_rate = -1
+	last_requested_tx_rate = -1
+	i = 0
+	repeated_run = False
+	best_rx_rate = -1
+	
+	while True:
+		rate = mid_rate
+
+		if rate < 0.1 or i >= iterations:
+			break
+		
+		data = run_pktgen(pcap, rate, cfg, duration_sec, dry_run, verbose)
+
+		# Very few packets sent, something went wrong
+		if data["tx"]["rate"] < 0.1:
+			print(f'[*][!] Too few packets sent, repeating run')
+			continue
+
+		# If we are increasing the rate, pktgen should not be sending less than before
+		invalid_run = (rate > last_requested_tx_rate and data["tx"]["rate"] < last_tx_rate)
+
+		# Difference in what we asked for and what we got, compared to the previous run
+		invalid_run |= rate < 50 and \
+			(abs((rate/last_requested_tx_rate) - (data["tx"]["rate"] / last_tx_rate)) > CHECKING_ERROR)
+
+		if last_tx_rate > 0 and invalid_run:
+			# The check if it's a repeated run is to avoid infinite loops
+			# (probably the invalid run won't repeat again)
+			if repeated_run:
+				print(f'[*][!] weird data, but we keep going...')
+			else:
+				print(f'[*][!] weird data, repeating run')
+				repeated_run = True
+				continue
+		
+		repeated_run = False
+
+		if data['loss'] < LOSS_THRESHOLD:
+			if data["rx"]["rate"] > best_rx_rate:
+				best_data = data
+				best_rx_rate = data["rx"]["rate"]
+
+			if mid_rate == upper_bound or i + 1 >= iterations:
+				break
+
+			min_rate = mid_rate
+			mid_rate = mid_rate + (max_rate - mid_rate) / 2
+		else:
+			max_rate = mid_rate
+			mid_rate = min_rate + (mid_rate - min_rate) / 2
+		
+		i += 1
+		last_tx_rate = data["tx"]["rate"]
+		last_requested_tx_rate = rate
+
+	print()
+	print( "[*] Best results:")
+	print(f'[*]   TX:   {best_data["tx"]["pkt_rate"]:3.2f} Mpps {best_data["tx"]["rate"]:3.2f} Gbps')
+	print(f'[*]   RX:   {best_data["rx"]["pkt_rate"]:3.2f} Mpps {best_data["rx"]["rate"]:3.2f} Gbps')
+	print(f'[*]   loss: {best_data["loss"]:.2f} %')
+
+	return best_data
 
 def select_cores(all_cores, num_cores, to_ignore):
 	filtered_cores = [ core for core in all_cores if core not in to_ignore ]
@@ -260,7 +364,7 @@ def select_cores(all_cores, num_cores, to_ignore):
 	
 	return filtered_cores[:num_cores]
 
-def run(tx_pcie_dev, rx_pcie_dev, pcap, num_tx_cores, num_rx_cores, rate, duration_sec, dry_run, verbose):
+def get_cfg(tx_pcie_dev, rx_pcie_dev, num_tx_cores, num_rx_cores):
 	all_cores     = get_all_cpus()
 	all_tx_cores  = get_pcie_dev_cpus(tx_pcie_dev)
 	all_rx_cores  = get_pcie_dev_cpus(rx_pcie_dev)
@@ -283,40 +387,28 @@ def run(tx_pcie_dev, rx_pcie_dev, pcap, num_tx_cores, num_rx_cores, rate, durati
 	print(f'[*] TX dev={tx_pcie_dev} port={tx_port} cores={tx_tx_cores}')
 	print(f'[*] RX dev={rx_pcie_dev} port={rx_port} cores={rx_rx_cores}')
 	print(f'[*] Master core={master_core}')
-	print(f"[*] Replaying at {rate}% linerate")
 
-	tx = {
-		'dev':   tx_pcie_dev,
-		'port':  tx_port,
-		'cores': {
-			'tx': tx_tx_cores,
-			'rx': tx_rx_cores,
+	cfg = {
+		'tx': {
+			'dev':   tx_pcie_dev,
+			'port':  tx_port,
+			'cores': {
+				'tx': tx_tx_cores,
+				'rx': tx_rx_cores,
+			},
 		},
+		'rx': {
+			'dev':   rx_pcie_dev,
+			'port':  rx_port,
+			'cores': {
+				'tx': rx_tx_cores,
+				'rx': rx_rx_cores,
+			},
+		},
+		'master': master_core
 	}
 
-	rx = {
-		'dev':   rx_pcie_dev,
-		'port':  rx_port,
-		'cores': {
-			'tx': rx_tx_cores,
-			'rx': rx_rx_cores,
-		},
-	}
-
-	data = run_pktgen(pcap, rate, tx, rx, master_core, duration_sec, dry_run, verbose)
-
-	results = []
-	results.append(str(data['tx']['rate']))
-	results.append(str(data['tx']['pkt_rate']))
-	results.append(str(data['rx']['rate']))
-	results.append(str(data['rx']['pkt_rate']))
-	results.append(str(data['loss']))
-
-	with open(RESULTS_FILENAME, 'w') as f:
-		f.write('# tx (Gbps), tx (Mpps), rx (Gbps), rx (Mpps), loss (%)')
-		f.write('\n')
-		f.write(','.join(results))
-		f.write('\n')
+	return cfg
 
 def range_limited_rate(arg):
 	MIN_VAL = MIN_RATE
@@ -347,7 +439,14 @@ def main():
 	parser.add_argument('--duration',
 		type=int, default=DEFAULT_DURATION_SEC, required=False, help='Time duration (seconds)')
 
-	parser.add_argument('--dry',
+	parser.add_argument('--iterations',
+		type=int, default=DEFAULT_ITERATIONS, required=False,
+		help='Iterations for finding stable throughput')
+	
+	parser.add_argument('--find-stable-throughput',
+		action='store_true', required=False, help='Time duration (seconds)')
+
+	parser.add_argument('--dry-run',
 		default=False, required=False, action='store_true',
 		help='Dry run (does not run pktgen, just prints out the configuration)')
 	
@@ -360,7 +459,14 @@ def main():
 	pcap = os.path.abspath(args.pcap)
 	assert os.path.exists(pcap)
 
-	run(args.tx, args.rx, pcap, args.tx_cores, args.rx_cores, args.rate, args.duration, args.dry, args.v)
+	cfg = get_cfg(args.tx, args.rx, args.tx_cores, args.rx_cores)
+
+	if args.find_stable_throughput:
+		data = search_throughput(pcap, cfg, args.duration, args.iterations, args.dry_run, args.v)
+	else:
+		data = run_pktgen(pcap, args.rate, cfg, args.duration, args.dry_run, args.v)
+
+	save_data(data)
 
 if __name__ == '__main__':
 	main()

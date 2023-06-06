@@ -18,8 +18,9 @@ fi
 get_deps() {
 	sudo apt update
 	sudo apt-get -y install build-essential make vim sudo wget curl git \
-		meson python3-pyelftools linux-generic linux-headers-generic \
+		python3-pyelftools python3-pip linux-generic linux-headers-generic \
 		cmake pkg-config libnuma-dev libpcap-dev lshw kmod iproute2 net-tools
+	pip3 install meson
 }
 
 install_dpdk() {
