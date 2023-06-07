@@ -19,7 +19,8 @@ get_deps() {
 	sudo apt update
 	sudo apt-get -y install build-essential make vim sudo wget curl git \
 		python3-pyelftools python3-pip linux-generic linux-headers-generic \
-		cmake pkg-config libnuma-dev libpcap-dev lshw kmod iproute2 net-tools
+		cmake pkg-config libnuma-dev libpcap-dev lshw kmod iproute2 net-tools \
+    ninja-build
 	pip3 install meson
 }
 
