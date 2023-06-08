@@ -98,6 +98,22 @@ def build_lua_script(rate, cfg, duration_sec):
 	f.write(script)
 	f.close()
 
+def validate_pcie_dev(pcie_dev):
+	cmd  = [ "lspci", "-mm" ]
+	info = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+	info = info.decode('utf-8')
+	info = info.split('\n')
+
+	for line in info:
+		line   = line.split(' ')
+		device = line[0]
+
+		if device in pcie_dev:
+			return
+	
+	print(f'Invalid PCIE dev \"{pcie_dev}\"')
+	exit(1)
+
 def get_device_numa_node(pcie_dev):
 	try:
 		cmd  = [ "lspci", "-s", pcie_dev, "-vv" ]
@@ -111,7 +127,7 @@ def get_device_numa_node(pcie_dev):
 		assert result
 		return int(result.group(1))
 	except subprocess.CalledProcessError:
-		print(f'Invalid PCIE dev {pcie_dev}')
+		print(f'Invalid PCIE dev \"{pcie_dev}\"')
 		exit(1)
 
 def get_all_cpus():
@@ -458,6 +474,9 @@ def main():
 
 	pcap = os.path.abspath(args.pcap)
 	assert os.path.exists(pcap)
+
+	validate_pcie_dev(args.tx)
+	validate_pcie_dev(args.rx)
 
 	cfg = get_cfg(args.tx, args.rx, args.tx_cores, args.rx_cores)
 
