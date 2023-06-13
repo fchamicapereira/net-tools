@@ -24,29 +24,15 @@ get_deps() {
 	pip3 install meson
 }
 
-install_dpdk() {
-	if [ -d $DPDK_DIR ]; then
-		return 0	
+install_pktgen() {
+	if [ ! -d $DPDK_DIR ]; then
+		echo "DPDK directory not found."
+		return 1
 	fi
 
-	pushd /tmp
-		DPDK_TAR="dpdk-$DPDK_VERSION.tar.xz"
-		wget https://fast.dpdk.org/rel/$DPDK_TAR
-		tar xJf $DPDK_TAR && rm $DPDK_TAR
-		mv dpdk-stable-$DPDK_VERSION $DPDK_DIR
-	popd
-
-	pushd $DPDK_DIR
-		meson build
-		ninja -C build
-		sudo ninja -C build install
-		sudo ldconfig
-	popd
-}
-
-install_pktgen() {
 	if [ -d $PKTGEN_DIR ]; then
-		return 0	
+		echo "Pktgen directory already exists: $PKTGEN_DIR."
+		return 0
 	fi
 
 	# Building DPDK Pktgen
@@ -75,5 +61,4 @@ install_pktgen() {
 }
 
 get_deps
-install_dpdk
 install_pktgen

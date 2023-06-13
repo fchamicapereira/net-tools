@@ -11,8 +11,6 @@ from scapy.utils import PcapWriter
 
 from pathlib import Path
 
-# MAX_RATE         = 100 # 100 Gbps
-MAX_RATE           = 50  # 60 Gbps for 64B packets
 EPOCHS_IN_EXP_TIME = 10
 MIN_EPOCHS         = 4 * EPOCHS_IN_EXP_TIME
 MIN_PKT_SIZE_BYTES = 64
@@ -118,10 +116,10 @@ def create_n_unique_flows(nflows, private_only, internet_only, flows_exception=[
 	
 	return flows
 
-def get_pkts_in_time(t_sec, pkt_sz_bytes):
+def get_pkts_in_time(t_sec, pkt_sz_bytes, rate_gbps):
 	IPG          = 24
-	max_rate_bps = MAX_RATE * 1e9
-	pkts         = int(max_rate_bps * t_sec / ((pkt_sz_bytes + IPG) * 8))
+	rate_bps     = rate_gbps * 1e9
+	pkts         = int(rate_bps * t_sec / ((pkt_sz_bytes + IPG) * 8))
 	assert pkts > 0
 	return pkts
 
@@ -130,9 +128,9 @@ def get_epoch_time(exp_time_sec):
 	assert t_sec > 0
 	return t_sec
 
-def get_pkts_in_epoch(exp_time_sec, pkt_sz_bytes):
+def get_pkts_in_epoch(exp_time_sec, pkt_sz_bytes, rate_gbps):
 	epoch_time_sec = get_epoch_time(exp_time_sec)
-	epoch_pkts     = get_pkts_in_time(epoch_time_sec, pkt_sz_bytes)
+	epoch_pkts     = get_pkts_in_time(epoch_time_sec, pkt_sz_bytes, rate_gbps)
 	return epoch_pkts
 
 def churn_from_modified_flows(modified_flows, epochs, epoch_time_sec):
@@ -140,10 +138,38 @@ def churn_from_modified_flows(modified_flows, epochs, epoch_time_sec):
 	churn_fpm = 60 * churn_fps
 	return int(churn_fpm)
 
-def get_required_number_of_epochs(exp_time_sec, churn_fpm, pkt_sz_bytes):
-	exp_tx_pkts    = get_pkts_in_time(exp_time_sec, pkt_sz_bytes)
+def print_report(data):
+	s = ''
+	s += f"min churn   {data['min_churn']:,} fpm\n"
+	s += f"max churn   {data['max_churn']:,} fpm\n"
+	s += f"pkt_sz      {data['pkt_sz']} bytes\n"
+	s += f"epochs      {data['epochs']}\n"
+	s += f"exp pkts    {data['exp_pkts']}\n"
+	s += f"pkts epochs {data['pkts_epochs']}\n"
+	s += f"min rate    {data['min_rate']:.2f} Gbps\n"
+	s += f"target rate {data['target_rate']:.2f} Gbps\n"
+	s += f"pcap sz     {data['pcap_sz']:,} bytes\n"
+	print(s)
+
+def save_report(data, report_filename):
+	s = ''
+	s += f"min churn   {data['min_churn']:,} fpm\n"
+	s += f"max churn   {data['max_churn']:,} fpm\n"
+	s += f"pkt_sz      {data['pkt_sz']} bytes\n"
+	s += f"epochs      {data['epochs']}\n"
+	s += f"exp pkts    {data['exp_pkts']}\n"
+	s += f"pkts epochs {data['pkts_epochs']}\n"
+	s += f"min rate    {data['min_rate']:.2f} Gbps\n"
+	s += f"target rate {data['target_rate']:.2f} Gbps\n"
+	s += f"pcap sz     {data['pcap_sz']:,} bytes\n"
+
+	with open(report_filename, 'w') as f:
+		f.write(s)
+
+def get_required_number_of_epochs(exp_time_sec, churn_fpm, pkt_sz_bytes, rate_gbps):
+	exp_tx_pkts    = get_pkts_in_time(exp_time_sec, pkt_sz_bytes, rate_gbps)
 	epoch_time_sec = get_epoch_time(exp_time_sec)
-	epoch_pkts     = get_pkts_in_epoch(exp_time_sec, pkt_sz_bytes)
+	epoch_pkts     = get_pkts_in_epoch(exp_time_sec, pkt_sz_bytes, rate_gbps)
 	
 	epochs         = MIN_EPOCHS
 	min_churn_fpm  = churn_from_modified_flows(1, epochs, epoch_time_sec)
@@ -163,17 +189,20 @@ def get_required_number_of_epochs(exp_time_sec, churn_fpm, pkt_sz_bytes):
 
 	min_rate_gbps = 1e-9 * epoch_pkts * MIN_PKT_SIZE_BYTES * 8 / exp_time_sec
 
-	print(f"min churn   {min_churn_fpm:,} fpm")
-	print(f"max churn   {max_churn_fpm:,} fpm")
-	print(f"pkt_sz      {pkt_sz_bytes} bytes")
-	print(f"epochs      {epochs}")
-	print(f"exp pkts    {exp_tx_pkts}")
-	print(f"pkts epochs {epoch_pkts}")
-	print(f"min rate    {min_rate_gbps:.2f} Gbps")
-	print(f"target rate {MAX_RATE:.2f} Gbps")
-	print(f"pcap sz     {epochs * epoch_pkts * pkt_sz_bytes:,} bytes")
+	report_data = {
+		'min_churn':   min_churn_fpm,
+		'max_churn':   max_churn_fpm,
+		'pkt_sz':      pkt_sz_bytes,
+		'epochs':      epochs,
+		'exp_pkts':    exp_tx_pkts,
+		'pkts_epochs': epoch_pkts,
+		'min_rate':    min_rate_gbps,
+		'target_rate': rate_gbps,
+		'pcap_sz':     epochs * epoch_pkts * pkt_sz_bytes,
+	}
 
-	return epochs
+
+	return epochs, report_data
 
 def get_epochs_flows(epoch_flows, churn_fpm, epochs, exp_time_sec, private_only, internet_only):
 	epoch_time_sec = get_epoch_time(exp_time_sec)
@@ -241,6 +270,9 @@ if __name__ == "__main__":
 
 	parser.add_argument('--churn', type=int, required=True,
 						help='churn in fpm (>= 1)')
+	
+	parser.add_argument('--rate', type=int, required=True, default=100,
+						help='rate in Gbps')
 
 	parser.add_argument('--size', type=int, required=True,
 						help=f'packet size ([{MIN_PKT_SIZE_BYTES},{MAX_PKT_SIZE_BYTES}])')
@@ -258,15 +290,23 @@ if __name__ == "__main__":
 	assert args.churn >= 0
 
 	exp_time_sec        = args.expiration * 1e-6
-	epoch_pkts          = get_pkts_in_epoch(exp_time_sec, args.size)
+	epoch_pkts          = get_pkts_in_epoch(exp_time_sec, args.size, args.rate)
 	epoch_flows         = create_n_unique_flows(epoch_pkts, args.private_only, args.internet_only)
-	epochs              = get_required_number_of_epochs(exp_time_sec, args.churn, args.size)
+	epochs, report      = get_required_number_of_epochs(exp_time_sec, args.churn, args.size, args.rate)
 	epochs_flows, churn = get_epochs_flows(epoch_flows, args.churn, epochs, exp_time_sec, args.private_only, args.internet_only)
 
-	output = f'churn_{churn}_fpm_{args.size}B_{args.expiration}us_{MAX_RATE}_Gbps.pcap'
-	print(f"out         {output}")
+	output_fname = f'churn_{churn}_fpm_{args.size}B_{args.expiration}us_{args.rate}_Gbps.pcap'
+	report_fname = f'churn_{churn}_fpm_{args.size}B_{args.expiration}us_{args.rate}_Gbps.dat'
 
-	generate_pkts(output, epochs_flows, args.size)
+	print()
+	print(f"Out:    {output_fname}")
+	print(f"Report: {report_fname}")
+	print()
+
+	print_report(report)
+	generate_pkts(output_fname, epochs_flows, args.size)
+
+	save_report(report, report_fname)
 
 	elapsed = time.time() - start_time
 	hr_elapsed = timedelta(seconds=elapsed)

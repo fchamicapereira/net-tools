@@ -281,7 +281,7 @@ def run_pktgen(pcap, rate, cfg, duration_sec, dry_run, verbose):
 
 	print(f"[*] TX   {data['tx']['pkt_rate']:3.2f} Mpps {data['tx']['rate']:3.2f} Gbps")
 	print(f"[*] RX   {data['rx']['pkt_rate']:3.2f} Mpps {data['rx']['rate']:3.2f} Gbps")
-	print(f"[*] loss {data['loss']} %")
+	print(f"[*] loss {data['loss']:3.2f} %")
 
 	return data
 
