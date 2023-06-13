@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-if !cat /etc/os-release | grep -q "VERSION_ID=\"20.04\""; then
+if ! cat /etc/os-release | grep -q "VERSION_ID=\"20.04\""; then
 	echo "Expecting Ubuntu 20.04. Exiting"
 	exit 1
 fi
