@@ -10,11 +10,6 @@ DPDK_DIR=/opt/dpdk
 
 export DEBIAN_FRONTEND=noninteractive
 
-if [ "$EUID" -ne 0 ]; then
-	echo "Please run as root."
-	exit 1
-fi
-
 get_deps() {
 	sudo apt update
 	sudo apt-get -y install build-essential make vim sudo wget curl git \
@@ -36,11 +31,13 @@ install_pktgen() {
 	fi
 
 	# Building DPDK Pktgen
-	git clone \
+	sudo git clone \
 		--depth 1 \
 		--branch pktgen-$PKTGEN_VERSION \
 		https://github.com/pktgen/Pktgen-DPDK.git \
 		$PKTGEN_DIR
+	
+	sudo chown -R $USER:$USER $PKTGEN_DIR
 
 	# DPDK places the libdpdk.pc (pkg-config file) in a non-standard location.
 	# We need to set enviroment variable PKG_CONFIG_PATH to the location of the file.

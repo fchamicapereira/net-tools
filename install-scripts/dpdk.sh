@@ -8,11 +8,6 @@ DPDK_DIR=/opt/dpdk
 
 export DEBIAN_FRONTEND=noninteractive
 
-if [ "$EUID" -ne 0 ]; then
-	echo "Please run as root."
-	exit 1
-fi
-
 get_deps() {
 	sudo apt update
 	sudo apt-get -y install build-essential make vim sudo wget curl git \
@@ -32,7 +27,8 @@ install_dpdk() {
 		DPDK_TAR="dpdk-$DPDK_VERSION.tar.xz"
 		wget https://fast.dpdk.org/rel/$DPDK_TAR
 		tar xJf $DPDK_TAR && rm $DPDK_TAR
-		mv dpdk-stable-$DPDK_VERSION $DPDK_DIR
+		sudo mv dpdk-stable-$DPDK_VERSION $DPDK_DIR
+		sudo chown -R $USER:$USER $DPDK_DIR
 	popd
 
 	pushd $DPDK_DIR
