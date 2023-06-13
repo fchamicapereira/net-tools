@@ -26,6 +26,10 @@ def random_mac(blacklist):
 		mac = f"02:00:00:{randint(0, 0xff):02x}:{randint(0, 0xff):02x}:{randint(0, 0xff):02x}"
 	return mac
 
+def is_valid_mac(mac):
+	p = re.compile(r'(?:[0-9a-fA-F]:?){12}')
+	return p.match(mac)
+
 def internet_ip():
 	def ip(msb_min, msb_max):
 		b0 = randint(msb_min, msb_max)
@@ -108,8 +112,8 @@ def generate_n_unique_flows(nflows, opts):
 	ips = []
 
 	while len(flows) != nflows:
-		src_mac = random_mac(macs)
-		dst_mac = random_mac(macs)
+		dst_mac = opts['dst_mac'] if is_valid_mac(opts['dst_mac']) else random_mac(macs)
+		src_mac = opts['src_mac'] if is_valid_mac(opts['src_mac']) else random_mac(macs)
 
 		src_ip = random_ip(ips, opts['private_only'], opts['internet_only'], opts['from_subnet'])
 		dst_ip = random_ip(ips, opts['private_only'], opts['internet_only'], opts['to_subnet'])
@@ -172,6 +176,8 @@ if __name__ == "__main__":
 	parser.add_argument('--internet-only', help='generate Internet only IPs', action='store_true', required=False)
 	parser.add_argument('--from-subnet', help='src IPs from this subnet', type=str, required=False)
 	parser.add_argument('--to-subnet', help='dst IPs from this subnet', type=str, required=False)
+	parser.add_argument('--dst-mac', help='destination MAC address', type=str, required=False)
+	parser.add_argument('--src-mac', help='source MAC address', type=str, required=False)
 
 	args = parser.parse_args()
 
@@ -195,6 +201,8 @@ if __name__ == "__main__":
 		'internet_only': args.internet_only,
 		'from_subnet':   args.from_subnet,
 		'to_subnet':     args.to_subnet,
+		'dst_mac':       args.dst_mac,
+		'src_mac':       args.src_mac,
 	}
 
 	flows = generate_n_unique_flows(args.flows, opts)
