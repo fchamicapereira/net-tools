@@ -31,24 +31,34 @@ package.path = package.path ..";?.lua;test/?.lua;app/?.lua;../?.lua"
 
 require "Pktgen";
 
-local duration  = {{duration}};
-local sendport  = "{{sendport}}";
-local recvport  = "{{recvport}}";
-local rate      = {{rate}};
-local delayTime = 1000;
-local n_to_send = 0; -- continuous stream of traffic
+local duration_ms        = {{duration}};
+local warmup_duration_ms = 10000;
+local sendport           = "{{sendport}}";
+local recvport           = "{{recvport}}";
+local rate               = {{rate}};
+local warmup_rate        = 0.01;
+local delay_ms           = 1000;
+local n_to_send          = 0; -- continuous stream of traffic
 
 function main()
 	pktgen.screen("off");
 	pktgen.clr();
 
-	pktgen.set(sendport, "rate", rate);
 	pktgen.set("all", "count", n_to_send);
 
+	-- warmup
+	pktgen.set(sendport, "rate", warmup_rate);
 	pktgen.start(sendport);
-	pktgen.delay(duration);
+	pktgen.delay(warmup_duration_ms);
+
+	-- real deal
+	pktgen.set(sendport, "rate", rate);
+	pktgen.clr();
+	pktgen.delay(duration_ms);
+
+	-- done
 	pktgen.stop(sendport);
-	pktgen.delay(delayTime);
+	pktgen.delay(delay_ms);
 	
 	local stats = pktgen.portStats("all", "port");
 
@@ -61,11 +71,11 @@ function main()
 	local txBytes = txStat["obytes"];
 	local rxBytes = rxStat["ibytes"];
 
-	local recordedTxRate = ((txBytes + 20) * 8.0) / (duration / 1e3);
-	local recordedRxRate = ((rxBytes + 20) * 8.0) / (duration / 1e3);
+	local recordedTxRate = ((txBytes + 20) * 8.0) / (duration_ms / 1e3);
+	local recordedRxRate = ((rxBytes + 20) * 8.0) / (duration_ms / 1e3);
 
-	local recordedTxPacketRate = tx / (duration / 1e3);
-	local recordedRxPacketRate = rx / (duration / 1e3);
+	local recordedTxPacketRate = tx / (duration_ms / 1e3);
+	local recordedRxPacketRate = rx / (duration_ms / 1e3);
 
 	local loss = (tx - rx) / tx;
 
